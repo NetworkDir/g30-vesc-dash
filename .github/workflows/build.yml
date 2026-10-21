@@ -37,7 +37,7 @@ jobs:
           make SDK_ROOT=../sdk/nRF5_SDK_12.3.0_d7731ad LINK=fd
       - name: Build DFU bootloader
         working-directory: firmware
-        run: ./bootloader/build_bootloader.sh ../sdk/nRF5_SDK_12.3.0_d7731ad
+        run: sh ./bootloader/build_bootloader.sh ../sdk/nRF5_SDK_12.3.0_d7731ad
       - uses: actions/upload-artifact@v4
         with:
           name: g30-vesc-dash-hex
