@@ -20,18 +20,27 @@ jobs:
       - name: Toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
-      - name: nRF5 SDK 12.3.0
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
+      - name: nRF5 SDK 12.3.0 + micro-ecc
         run: |
           curl -sSL -o sdk.zip https://developer.nordicsemi.com/nRF5_SDK/nRF5_SDK_v12.x.x/nRF5_SDK_12.3.0_d7731ad.zip
-          mkdir -p sdk
-          unzip -q sdk.zip -d sdk
-      - name: Build
+          mkdir -p sdk && unzip -q sdk.zip -d sdk
+          SDK=sdk/nRF5_SDK_12.3.0_d7731ad
+          printf 'GNU_INSTALL_ROOT := /usr\nGNU_VERSION := %s\nGNU_PREFIX := arm-none-eabi\n' \
+            "$(arm-none-eabi-gcc -dumpversion)" > $SDK/components/toolchain/gcc/Makefile.posix
+          git clone -q https://github.com/kmackay/micro-ecc $SDK/external/micro-ecc/micro-ecc
+          make -C $SDK/external/micro-ecc/nrf51_armgcc/armgcc
+      - name: Build app (both link modes)
         working-directory: firmware
         run: |
           make SDK_ROOT=../sdk/nRF5_SDK_12.3.0_d7731ad LINK=hd
           make SDK_ROOT=../sdk/nRF5_SDK_12.3.0_d7731ad LINK=fd
+      - name: Build DFU bootloader
+        working-directory: firmware
+        run: ./bootloader/build_bootloader.sh ../sdk/nRF5_SDK_12.3.0_d7731ad
       - uses: actions/upload-artifact@v4
         with:
           name: g30-vesc-dash-hex
-          path: firmware/build/*/*.hex
+          path: |
+            firmware/build/*/*.hex
+            firmware/build/bl/*.hex

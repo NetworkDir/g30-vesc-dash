@@ -100,6 +100,11 @@ Prebuilt images are in [release/](release/). The `_full.hex` files
 contain the S130 SoftDevice and the application and need a full chip
 erase, which also removes the stock SoftDevice, bootloader and firmware.
 
+To update later over Bluetooth instead of ST-Link, flash the `_factory.hex`
+(SoftDevice + DFU bootloader + app) once and then use signed `_dfu.zip`
+packages from a phone — see [docs/dfu.md](docs/dfu.md). BLE OTA needs the
+32 KB (QFAC) chip variant; the plain `_full.hex` works on any variant.
+
 **Back up first.** The stock firmware cannot be reinstalled without a full
 flash dump:
 
