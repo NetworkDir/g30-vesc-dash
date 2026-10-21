@@ -1,0 +1,37 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Simulation tests (single wire and two wire)
+        working-directory: firmware
+        run: make test
+
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: nRF5 SDK 12.3.0
+        run: |
+          curl -sSL -o sdk.zip https://developer.nordicsemi.com/nRF5_SDK/nRF5_SDK_v12.x.x/nRF5_SDK_12.3.0_d7731ad.zip
+          mkdir -p sdk
+          unzip -q sdk.zip -d sdk
+      - name: Build
+        working-directory: firmware
+        run: |
+          make SDK_ROOT=../sdk/nRF5_SDK_12.3.0_d7731ad LINK=hd
+          make SDK_ROOT=../sdk/nRF5_SDK_12.3.0_d7731ad LINK=fd
+      - uses: actions/upload-artifact@v4
+        with:
+          name: g30-vesc-dash-hex
+          path: firmware/build/*/*.hex
