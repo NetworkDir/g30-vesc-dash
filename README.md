@@ -76,11 +76,20 @@ GND) instead of the VESC.
 1. **Motor Settings → Additional Info → Setup**: wheel diameter, motor
    poles and gear ratio (speed on the display and the mode speed limits use
    these), battery type and cell count (battery bars).
-2. **App Settings → VESC Remote**: Control Type *Current No Reverse*,
+2. **App Settings → VESC Remote**: Control Type *Current No Reverse*. This
+   is what makes the throttle produce current — the dash sends the levers as
+   VESC Remote (nunchuk) data, and this control type is applied whatever the
+   "App to Use" is. With Control Type *None* the throttle does nothing.
    Deadband about 0.02 (the dash already has its own), ramp times and
    throttle curve as you like.
-3. **App Settings → General**: Timeout about 500 ms. Two wire mode: App to
-   Use *UART*, baud rate 115200.
+3. **App Settings → General → App to Use**:
+   - Single wire mode: **No App**. (Not *Nunchuk* — that starts the I2C
+     remote thread which grabs the COMM pins and fights the Lisp UART. Not
+     *UART* — the Lisp script owns the UART itself. The throttle still works
+     because the VESC Remote control type above is applied regardless.)
+   - Two wire mode: **UART**, baud rate 115200.
+
+   Timeout about 500 ms in both cases.
 4. **Lisp** ([lisp/g30dash_bridge.lisp](lisp/g30dash_bridge.lisp)): over
    USB, open the Lisp tab, load the script, upload with *Run on boot*.
    Two wire mode: set `bridge` to 0 and `btn-pin` to the pin the button
