@@ -95,11 +95,11 @@
         (if (or (= hdr 2) (= hdr 3))
             (if (= (read-n frame (- hdr 1) 1) (- hdr 1)) {
                     (var len (if (= hdr 2) (bufget-u8 frame 1) (bufget-u16 frame 1)))
-                    (var rest (+ len 3))
-                    (if (and (> len 0) (<= (+ hdr rest) 600))
-                        (if (= (read-n frame rest hdr) rest) {
-                                (var pkt (bufcreate (+ hdr rest)))
-                                (bufcpy pkt 0 frame 0 (+ hdr rest))
+                    (var frame-rest (+ len 3))
+                    (if (and (> len 0) (<= (+ hdr frame-rest) 600))
+                        (if (= (read-n frame frame-rest hdr) frame-rest) {
+                                (var pkt (bufcreate (+ hdr frame-rest)))
+                                (bufcpy pkt 0 frame 0 (+ hdr frame-rest))
                                 (cmds-proc pkt)
                                 (free pkt)
                                 (sleep 0.002)
