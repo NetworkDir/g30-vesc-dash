@@ -93,12 +93,6 @@ static unsigned int ble_tx_free(void) {
 	return BLE_TX_SIZE - (m_ble_tx_head - m_ble_tx_tail);
 }
 
-static void ble_tx_write(unsigned char *data, unsigned int len);
-
-void main_ble_write(const uint8_t *data, unsigned int len) {
-	ble_tx_write((unsigned char *)data, len);
-}
-
 static void ble_tx_write(unsigned char *data, unsigned int len) {
 	if (m_conn_handle == BLE_CONN_HANDLE_INVALID || ble_tx_free() < len) {
 		return;
@@ -144,11 +138,7 @@ static void ble_rx_drain(void) {
 	while (m_ble_rx_tail != m_ble_rx_head) {
 		uint8_t b = m_ble_rx[m_ble_rx_tail & (BLE_RX_SIZE - 1)];
 		m_ble_rx_tail++;
-#if APP_ELOAD
-		dash_ble_rx(b);
-#else
 		packet_process_byte(b, PACKET_BLE);
-#endif
 	}
 }
 
@@ -163,7 +153,7 @@ static void process_packet_ble(unsigned char *data, unsigned int len) {
 
 // Complete packet from the VESC
 static void process_packet_vesc(unsigned char *data, unsigned int len) {
-	if (dash_on_vesc_packet(data, len) || APP_ELOAD) {
+	if (dash_on_vesc_packet(data, len)) {
 		return;
 	}
 

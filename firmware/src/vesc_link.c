@@ -77,7 +77,7 @@ static void bus_dir_rx(void) {
 
 	nrf_gpio_pin_set(BOARD_BUS_PARK_PIN);
 	nrf_gpio_cfg_output(BOARD_BUS_PARK_PIN);
-	nrf_gpio_cfg_input(BOARD_BUS_PIN, LINK_LISTEN_PULL);
+	nrf_gpio_cfg_input(BOARD_BUS_PIN, NRF_GPIO_PIN_PULLDOWN);
 
 	NRF_UART0->PSELTXD = BOARD_BUS_PARK_PIN;
 	NRF_UART0->PSELRXD = BOARD_BUS_PIN;

@@ -11,7 +11,6 @@
 # key at dfu_key/dfu_private.pem.
 #
 # Usage: ./package_dfu.sh <hd|fd> [app-version]
-#        APP=eload ./package_dfu.sh hd   (m365-eload dashboard build)
 
 set -e
 
@@ -24,16 +23,9 @@ NRFUTIL=${NRFUTIL:-"python -m nordicsemi"}
 SD_HEX="$SDK_ROOT/components/softdevice/s130/hex/s130_nrf51_2.0.1_softdevice.hex"
 KEY="$HERE/dfu_key/dfu_private.pem"
 
-APP=${APP:-vesc}
-if [ "$APP" = eload ]; then
-	BASE=g30_eload_dash
-	OUT="$HERE/build/eload_$LINK"
-else
-	BASE=g30_vesc_dash
-	OUT="$HERE/build/$LINK"
-fi
-APP_HEX="$OUT/${BASE}_$LINK.hex"
+APP_HEX="$HERE/build/$LINK/g30_vesc_dash_$LINK.hex"
 BL_HEX="$HERE/build/bl/bootloader.hex"
+OUT="$HERE/build/$LINK"
 
 # S130 2.0.1 firmware id, for the DFU init-packet SoftDevice requirement.
 SD_REQ=0x87
@@ -59,7 +51,7 @@ python "$HERE/tools/hexfilter.py" "$OUT/settings.hex" 0x3FC00 0x40000 "$OUT/sett
 
 # 2. One-time factory image: SoftDevice + bootloader + app + settings.
 python "$HERE/tools/mergehex.py" "$SD_HEX" "$BL_HEX" "$APP_HEX" "$OUT/settings_main.hex" \
-	"$OUT/${BASE}_${LINK}_factory.hex"
+	"$OUT/g30_vesc_dash_${LINK}_factory.hex"
 
 # 3. Signed app-only DFU package for BLE updates.
 $NRFUTIL pkg generate \
@@ -68,8 +60,8 @@ $NRFUTIL pkg generate \
 	--application "$APP_HEX" \
 	--application-version "$APPVER" \
 	--key-file "$KEY" \
-	"$OUT/${BASE}_${LINK}_dfu.zip"
+	"$OUT/g30_vesc_dash_${LINK}_dfu.zip"
 
 echo "built:"
-echo "  $OUT/${BASE}_${LINK}_factory.hex"
-echo "  $OUT/${BASE}_${LINK}_dfu.zip"
+echo "  $OUT/g30_vesc_dash_${LINK}_factory.hex"
+echo "  $OUT/g30_vesc_dash_${LINK}_dfu.zip"

@@ -2,7 +2,6 @@
 #
 #   make                      single wire build
 #   make LINK=fd              two wire (full duplex) build
-#   make APP=eload            dashboard for the m365-eload firmware
 #   make CFG="-DSTART_OFF=1"  any dash_config.h override
 #   make flash_all            erase chip, write SoftDevice + app (OpenOCD)
 #
@@ -20,20 +19,8 @@ ifeq ($(LINK),fd)
 CFG += -DLINK_FULL_DUPLEX=1
 endif
 
-# APP=eload: dashboard for the m365-eload firmware (M365 ESC as electronic load)
-APP         ?= vesc
-
-ifeq ($(APP),eload)
-CFG += -DAPP_ELOAD=1
-DASH_SRC    := src/eload_dash.c
-NAME        := g30_eload_dash_$(LINK)
-BUILD       := build/eload_$(LINK)
-else
-CFG += -DAPP_ELOAD=0
-DASH_SRC    := src/dash.c
 NAME        := g30_vesc_dash_$(LINK)
 BUILD       := build/$(LINK)
-endif
 SD_HEX      := $(SDK_ROOT)/components/softdevice/s130/hex/s130_nrf51_2.0.1_softdevice.hex
 LD_SCRIPT   := linker/g30dash_s130_16k.ld
 
@@ -43,7 +30,7 @@ SIZE        := $(GNU_PREFIX)size
 
 SRC_APP := \
   src/main.c \
-  $(DASH_SRC) \
+  src/dash.c \
   src/display.c \
   src/tm1637.c \
   src/board_io.c \

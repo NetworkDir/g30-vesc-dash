@@ -25,16 +25,6 @@
 #define LINK_FD_RX_PIN              20
 #endif
 
-// Pull on the bus pin while listening. The stock firmware pulls down; the
-// m365-eload ESC drives the line open drain, so that build pulls up.
-#ifndef LINK_LISTEN_PULL
-#if APP_ELOAD
-#define LINK_LISTEN_PULL            NRF_GPIO_PIN_PULLUP
-#else
-#define LINK_LISTEN_PULL            NRF_GPIO_PIN_PULLDOWN
-#endif
-#endif
-
 #ifndef LINK_BAUDRATE
 #define LINK_BAUDRATE               UART_BAUDRATE_BAUDRATE_Baud115200
 #endif
@@ -126,24 +116,6 @@
 
 // VESC Tool lists any device advertising the Nordic UART service, the
 // "VESC" prefix just makes it easy to spot.
-#if APP_ELOAD
-#define BLE_DEVICE_NAME             "M365 ELOAD"
-#else
 #define BLE_DEVICE_NAME             "VESC G30"
-#endif
-
-/* ------------------------------------------------------------------ */
-/* m365-eload build (make APP=eload)                                   */
-/* ------------------------------------------------------------------ */
-
-// Potentiometer on the throttle input, raw 10 bit counts (ratiometric to
-// VDD) for 0 % and 100 %. A pot between VDD and GND gives about 0..1023;
-// for the stock hall lever use about 170 / 760.
-#ifndef POT_RAW_MIN
-#define POT_RAW_MIN                 20
-#endif
-#ifndef POT_RAW_MAX
-#define POT_RAW_MAX                 1000
-#endif
 
 #endif /* DASH_CONFIG_H_ */

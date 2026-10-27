@@ -213,33 +213,6 @@ slow, jittery Lisp side), link loss and recovery. It also checks that the
 single wire bus never has a collision or a byte sent to a side that is not
 listening.
 
-## m365-eload dashboard build
-
-`make APP=eload` builds a different application for the dashboard: the
-display and Bluetooth front end of
-[m365-eload](https://github.com/NetworkDir/m365-eload), a Xiaomi M365 ESC
-running as a 3-phase electronic load. Prebuilt images:
-`release/g30_eload_dash_*` (`_full.hex` SoftDevice + app, `_factory.hex` with
-the DFU bootloader, `_dfu.zip` for a BLE update).
-
-- A potentiometer on the throttle input sets the load current (0..100 % of
-  the maximum set on the ESC). Raw range `POT_RAW_MIN` / `POT_RAW_MAX` in
-  `dash_config.h` (pot between the throttle supply and GND: defaults).
-- Display, changed with a short press of the ESC power button:
-  ECO = bus voltage, D = DC current, S = both, alternating every 2 s.
-  km/h lit = the number is volts, mph lit = amps. Faults alternate with the
-  red code and the wrench (code = ESC fault number). Bars: current setpoint,
-  temperature icon: derating, headlight icon: fan on, lock: turn the pot to
-  zero to arm the output, `--`: no data from the ESC.
-- Bluetooth "M365 ELOAD": a plain text terminal (any Nordic UART app, e.g.
-  Serial Bluetooth Terminal). The ESC status lines show up there and every
-  ESC command works (`imax 20`, `f 50`, `cal 3.1`, `save`, `help`, ...).
-- Wiring to the M365 ESC: yellow to the dashboard data wire of the ESC
-  (PB6), black to GND, red to 5 V. The single wire bus is pulled up by the
-  dashboard in this build (the ESC drives it open drain).
-
-Protocol: `src/eload_proto.h` (VESC packet framing, own commands 0x70/0x71).
-
 ## Credits and license
 
 - BLE bridge based on [nrf51_vesc](https://github.com/vedderb/nrf51_vesc)
