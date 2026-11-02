@@ -1,7 +1,7 @@
 # BLE updates (Nordic secure DFU)
 
 After a one-time ST-Link install of the *factory* image, the firmware can be
-updated over Bluetooth with a standard Nordic DFU app — no cable, no
+updated over Bluetooth with a standard Nordic DFU app. No cable, no
 ScooterHacking. Updates are signed; the dashboard only accepts packages
 signed with the matching private key.
 
@@ -62,7 +62,7 @@ easy one.
 
 `firmware/dfu_key/dfu_private.pem` signs the DFU packages, and its public key
 is baked into the bootloader (`firmware/bootloader/dfu_public_key.c`). It is
-**not** committed — keep a backup. The bootloader only accepts packages
+**not** committed, keep a backup. The bootloader only accepts packages
 signed with this key, so:
 
 - To publish a new OTA build, sign it with the same key (`package_dfu.sh`
@@ -93,8 +93,12 @@ Then build and package:
 cd firmware
 ./build.sh LINK=hd && ./build.sh LINK=fd
 ./bootloader/build_bootloader.sh
-./package_dfu.sh hd && ./package_dfu.sh fd
+./package_dfu.sh hd 2 && ./package_dfu.sh fd 2
 ```
+
+The last argument is the application version. The bootloader refuses a
+package older than the app it is running, so raise it with every release
+(v0.1.0 was 1, v0.2.0 is 2).
 
 `nrfutil` (the Nordic Python tool, `pip install nrfutil`) provides
 `nordicsemi`. Outputs land in `firmware/build/<hd|fd>/`.

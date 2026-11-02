@@ -51,6 +51,25 @@
 #define BUTTON_LONG_PRESS_MS        2000    // power off / on
 
 /* ------------------------------------------------------------------ */
+/* Headlight strobe                                                    */
+/* ------------------------------------------------------------------ */
+
+// Presses in a row that toggle the strobe (3..9, 0 = no strobe). One and
+// two presses are taken by the headlight and the riding mode.
+#ifndef LIGHT_STROBE_PRESSES
+#define LIGHT_STROBE_PRESSES        3
+#endif
+
+// Pattern: LIGHT_STROBE_FLASHES flashes of ON/OFF ms, then a pause.
+// 1 flash and no pause gives a plain even strobe.
+#ifndef LIGHT_STROBE_FLASHES
+#define LIGHT_STROBE_FLASHES        2
+#endif
+#define LIGHT_STROBE_ON_MS          50
+#define LIGHT_STROBE_OFF_MS         70
+#define LIGHT_STROBE_PAUSE_MS       400
+
+/* ------------------------------------------------------------------ */
 /* Riding modes (applied with COMM_SET_MCCONF_TEMP_SETUP, not stored)   */
 /* ------------------------------------------------------------------ */
 

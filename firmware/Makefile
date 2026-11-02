@@ -35,6 +35,7 @@ SRC_APP := \
   src/tm1637.c \
   src/board_io.c \
   src/vesc_link.c \
+  src/ble_bridge.c \
   src/settings.c \
   src/packet.c \
   src/crc.c \
@@ -155,9 +156,11 @@ flash_all: $(BUILD)/$(NAME)_with_sd.hex
 
 # Host simulation tests (native gcc), both link modes
 HOST_CC   ?= gcc
-TEST_SRC  := src/vesc_link.c src/dash.c src/display.c src/packet.c src/crc.c \
-             src/buffer.c test/mock_hw.c test/test_main.c
-TEST_FLAGS := -std=gnu99 -Wall -Wextra -Wno-unused-parameter -O1 -g -Itest/mock -Isrc -Itest
+TEST_SRC  := src/vesc_link.c src/ble_bridge.c src/dash.c src/display.c src/packet.c \
+             src/crc.c src/buffer.c test/mock_hw.c test/test_main.c
+# Extra packet handlers for the simulated VESC and phone
+TEST_FLAGS := -std=gnu99 -Wall -Wextra -Wno-unused-parameter -O1 -g -Itest/mock -Isrc -Itest \
+              -DPACKET_HANDLERS=4
 
 test:
 	mkdir -p build

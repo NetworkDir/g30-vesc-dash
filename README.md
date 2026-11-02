@@ -10,7 +10,8 @@ Replacement firmware for the stock Segway-Ninebot Max G30 BLE dashboard
   timeout are configured in VESC Tool
 - **Display**: speed, battery bars, riding mode, headlight, Bluetooth,
   fault code with wrench icon, temperature warning, lock
-- **Button**: headlight, riding modes (ECO / D / S), lock, soft power off
+- **Button**: headlight, headlight strobe, riding modes (ECO / D / S), lock,
+  soft power off
 - **Riding modes** set current scale and speed limit on the VESC at run
   time (`COMM_SET_MCCONF_TEMP_SETUP`, nothing is written to flash)
 - Headlight and buzzer driven like the stock firmware
@@ -77,15 +78,15 @@ GND) instead of the VESC.
    poles and gear ratio (speed on the display and the mode speed limits use
    these), battery type and cell count (battery bars).
 2. **App Settings → VESC Remote**: Control Type *Current No Reverse*. This
-   is what makes the throttle produce current — the dash sends the levers as
+   is what makes the throttle produce current: the dash sends the levers as
    VESC Remote (nunchuk) data, and this control type is applied whatever the
    "App to Use" is. With Control Type *None* the throttle does nothing.
    Deadband about 0.02 (the dash already has its own), ramp times and
    throttle curve as you like.
 3. **App Settings → General → App to Use**:
-   - Single wire mode: **No App**. (Not *Nunchuk* — that starts the I2C
+   - Single wire mode: **No App**. (Not *Nunchuk*, that starts the I2C
      remote thread which grabs the COMM pins and fights the Lisp UART. Not
-     *UART* — the Lisp script owns the UART itself. The throttle still works
+     *UART*, the Lisp script owns the UART itself. The throttle still works
      because the VESC Remote control type above is applied regardless.)
    - Two wire mode: **UART**, baud rate 115200.
 
@@ -111,7 +112,7 @@ erase, which also removes the stock SoftDevice, bootloader and firmware.
 
 To update later over Bluetooth instead of ST-Link, flash the `_factory.hex`
 (SoftDevice + DFU bootloader + app) once and then use signed `_dfu.zip`
-packages from a phone — see [docs/dfu.md](docs/dfu.md). BLE OTA needs the
+packages from a phone, see [docs/dfu.md](docs/dfu.md). BLE OTA needs the
 32 KB (QFAC) chip variant; the plain `_full.hex` works on any variant.
 
 **Back up first.** The stock firmware cannot be reinstalled without a full
@@ -148,6 +149,8 @@ Later updates only need the `_app.hex` (no erase).
 |---|---|
 | Single press | Headlight on/off |
 | Double press | Mode ECO → D → S (1, 2, 3 beeps), remembered across restarts |
+| Triple press | Headlight strobe on (3 beeps) / off (1 beep) |
+| Single press while strobing | Headlight off |
 | Brake held + double press | Lock on/off. Locked: no throttle, brakes and beeps when pushed |
 | Long press (2 s), standing still | Soft off: display off, no throttle, brake still works |
 | Press while off | On again |
@@ -160,6 +163,10 @@ Display:
   for a disconnected throttle / brake sensor
 - Blinking thermometer: MOSFET or motor temperature above the warning level
 - Battery: one bar per 20 %, the top bar blinks in its lower half
+
+The strobe flashes twice, pauses, and repeats. The number of presses
+(`LIGHT_STROBE_PRESSES`, 3 to 9, 0 turns the strobe off) and the pattern
+are set in `dash_config.h`. Locking or turning the dash off stops it.
 
 The throttle is ignored until it has been released once after power-up,
 and the levers' released position is calibrated at every power-up, so keep
@@ -176,9 +183,9 @@ Duty, power and battery current limits are read from the VESC and kept.
 ## Configuration
 
 All options are in [firmware/src/dash_config.h](firmware/src/dash_config.h):
-link mode and pins, mode current scales and speed limits, lever
-thresholds, km/h or mph, warning temperatures, start in the off state,
-auto off, BLE name.
+link mode and pins, mode current scales and speed limits, strobe presses
+and pattern, lever thresholds, km/h or mph, warning temperatures, start in
+the off state, auto off, BLE name.
 
 ## Building
 
@@ -207,9 +214,15 @@ cd firmware && ./build.sh test
 Builds the link layer, dashboard logic and display code for the host with
 mocked hardware and runs them against a simulated VESC in both link modes:
 boot and calibration, mode application, display content, throttle and
-brake output, every button action, lock, soft off, throttle arming, sensor
-faults, VESC Tool traffic while riding (including 450 byte answers and a
-slow, jittery Lisp side), link loss and recovery. It also checks that the
+brake output, every button action, strobe pattern, lock, soft off, throttle
+arming, sensor faults, VESC Tool traffic while riding (including 450 byte
+answers and a slow, jittery Lisp side), link loss and recovery.
+
+The BLE side runs through the same buffers as on the target, against a
+simulated phone: writes arrive in 20 byte pieces, notifications are limited
+to a few per connection event, 450 byte answers and 500 byte writes must
+arrive intact, and replies sent before notifications are enabled or across
+a disconnect must not get stuck or corrupt the next answer. It also checks that the
 single wire bus never has a collision or a byte sent to a side that is not
 listening.
 

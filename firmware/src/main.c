@@ -28,6 +28,7 @@
 
 #include "dash_config.h"
 #include "packet.h"
+#include "ble_bridge.h"
 #include "vesc_link.h"
 #include "dash.h"
 #include "board_io.h"
@@ -60,11 +61,6 @@
 #define NEXT_CONN_PARAMS_UPDATE_DELAY   APP_TIMER_TICKS(30000, APP_TIMER_PRESCALER)
 #define MAX_CONN_PARAMS_UPDATE_COUNT    3
 
-#define PACKET_BLE                      1
-
-#define BLE_RX_SIZE                     256     // power of two
-#define BLE_TX_SIZE                     1024    // power of two
-
 #define WDT_TIMEOUT_S                   2
 
 APP_TIMER_DEF(m_tick_timer);
@@ -75,71 +71,19 @@ static ble_nus_t m_nus;
 static volatile uint16_t m_conn_handle = BLE_CONN_HANDLE_INVALID;
 static ble_uuid_t m_adv_uuids[] = {{BLE_UUID_NUS_SERVICE, NUS_SERVICE_UUID_TYPE}};
 
-// BLE -> main (written in the SoftDevice event handler)
-static uint8_t m_ble_rx[BLE_RX_SIZE];
-static volatile uint32_t m_ble_rx_head;
-static volatile uint32_t m_ble_rx_tail;
-
-// main -> BLE
-static uint8_t m_ble_tx[BLE_TX_SIZE];
-static uint32_t m_ble_tx_head;
-static uint32_t m_ble_tx_tail;
-
 /* ------------------------------------------------------------------ */
-/* BLE buffers                                                         */
+/* BLE bridge glue                                                     */
 /* ------------------------------------------------------------------ */
 
-static unsigned int ble_tx_free(void) {
-	return BLE_TX_SIZE - (m_ble_tx_head - m_ble_tx_tail);
-}
-
-static void ble_tx_write(unsigned char *data, unsigned int len) {
-	if (m_conn_handle == BLE_CONN_HANDLE_INVALID || ble_tx_free() < len) {
-		return;
+static ble_send_res_t nus_send(uint8_t *data, uint16_t len) {
+	uint32_t err = ble_nus_string_send(&m_nus, data, len);
+	if (err == NRF_SUCCESS) {
+		return BLE_SEND_OK;
+	} else if (err == BLE_ERROR_NO_TX_PACKETS) {
+		return BLE_SEND_BUSY;
 	}
-
-	for (unsigned int i = 0;i < len;i++) {
-		m_ble_tx[m_ble_tx_head & (BLE_TX_SIZE - 1)] = data[i];
-		m_ble_tx_head++;
-	}
-}
-
-static void ble_tx_flush(void) {
-	m_ble_tx_tail = m_ble_tx_head;
-}
-
-static void ble_tx_drain(void) {
-	while (m_conn_handle != BLE_CONN_HANDLE_INVALID && m_ble_tx_head != m_ble_tx_tail) {
-		uint8_t chunk[BLE_NUS_MAX_DATA_LEN];
-		uint32_t n = m_ble_tx_head - m_ble_tx_tail;
-		if (n > BLE_NUS_MAX_DATA_LEN) {
-			n = BLE_NUS_MAX_DATA_LEN;
-		}
-
-		for (uint32_t i = 0;i < n;i++) {
-			chunk[i] = m_ble_tx[(m_ble_tx_tail + i) & (BLE_TX_SIZE - 1)];
-		}
-
-		uint32_t err = ble_nus_string_send(&m_nus, chunk, n);
-		if (err == NRF_SUCCESS) {
-			m_ble_tx_tail += n;
-		} else if (err == BLE_ERROR_NO_TX_PACKETS) {
-			// Continue on the next TX complete event
-			break;
-		} else {
-			// Notifications not enabled yet or link gone
-			ble_tx_flush();
-			break;
-		}
-	}
-}
-
-static void ble_rx_drain(void) {
-	while (m_ble_rx_tail != m_ble_rx_head) {
-		uint8_t b = m_ble_rx[m_ble_rx_tail & (BLE_RX_SIZE - 1)];
-		m_ble_rx_tail++;
-		packet_process_byte(b, PACKET_BLE);
-	}
+	// Notifications not enabled yet or link gone
+	return BLE_SEND_FAIL;
 }
 
 /* ------------------------------------------------------------------ */
@@ -157,10 +101,7 @@ static void process_packet_vesc(unsigned char *data, unsigned int len) {
 		return;
 	}
 
-	// Forward whole packets only
-	if (m_conn_handle != BLE_CONN_HANDLE_INVALID && ble_tx_free() >= len + 6) {
-		packet_send_packet(data, len, PACKET_BLE);
-	}
+	(void)ble_bridge_send_packet(data, len);
 }
 
 /* ------------------------------------------------------------------ */
@@ -205,15 +146,7 @@ static void gap_params_init(void) {
 
 static void nus_data_handler(ble_nus_t * p_nus, uint8_t * p_data, uint16_t length) {
 	(void)p_nus;
-
-	for (uint32_t i = 0;i < length;i++) {
-		uint32_t head = m_ble_rx_head;
-		if ((head - m_ble_rx_tail) >= BLE_RX_SIZE) {
-			break;
-		}
-		m_ble_rx[head & (BLE_RX_SIZE - 1)] = p_data[i];
-		m_ble_rx_head = head + 1;
-	}
+	ble_bridge_rx(p_data, length);
 }
 
 static void services_init(void) {
@@ -223,10 +156,10 @@ static void services_init(void) {
 	APP_ERROR_CHECK(ble_nus_init(&m_nus, &nus_init));
 }
 
+// Many phones keep their own connection interval and turn the update
+// request down. That is fine for VESC Tool, so stay connected.
 static void on_conn_params_evt(ble_conn_params_evt_t * p_evt) {
-	if (p_evt->evt_type == BLE_CONN_PARAMS_EVT_FAILED) {
-		(void)sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_CONN_INTERVAL_UNACCEPTABLE);
-	}
+	(void)p_evt;
 }
 
 static void conn_params_error_handler(uint32_t nrf_error) {
@@ -408,7 +341,7 @@ int main(void) {
 	advertising_init();
 	conn_params_init();
 
-	packet_init(ble_tx_write, process_packet_ble, PACKET_BLE);
+	ble_bridge_init(process_packet_ble, nus_send);
 	link_init(process_packet_vesc);
 	dash_init();
 
@@ -419,7 +352,6 @@ int main(void) {
 	wdt_init();
 
 	uint32_t packet_tick = systime_ms();
-	bool was_connected = false;
 
 	for (;;) {
 		uint32_t now = systime_ms();
@@ -430,17 +362,10 @@ int main(void) {
 			packet_timerfunc();
 		}
 
-		bool connected = m_conn_handle != BLE_CONN_HANDLE_INVALID;
-		if (connected != was_connected) {
-			was_connected = connected;
-			ble_tx_flush();
-			packet_reset(PACKET_BLE);
-		}
-
-		ble_rx_drain();
-		link_task(now, ble_tx_free());
+		ble_bridge_task(m_conn_handle != BLE_CONN_HANDLE_INVALID);
+		link_task(now, ble_bridge_tx_free());
 		dash_task(now);
-		ble_tx_drain();
+		ble_bridge_task(m_conn_handle != BLE_CONN_HANDLE_INVALID);
 		wdt_feed();
 
 		(void)sd_app_evt_wait();

@@ -41,6 +41,15 @@
 #define DASH_FAULT_BRAKE    15
 
 #define MODE_COUNT          3
+#define BTN_MAX_CLICKS      9
+
+#if LIGHT_STROBE_PRESSES != 0 && (LIGHT_STROBE_PRESSES < 3 || LIGHT_STROBE_PRESSES > BTN_MAX_CLICKS)
+#error "LIGHT_STROBE_PRESSES must be 0 or 3..9"
+#endif
+
+#if LIGHT_STROBE_FLASHES < 1
+#error "LIGHT_STROBE_FLASHES must be 1 or more"
+#endif
 
 typedef enum {
 	PWR_BOOT = 0,
@@ -52,6 +61,7 @@ typedef enum {
 typedef enum {
 	BTN_SINGLE = 0,
 	BTN_DOUBLE,
+	BTN_STROBE,
 	BTN_LONG
 } btn_event_t;
 
@@ -112,6 +122,8 @@ static struct {
 	bool mode_dirty;
 	uint32_t mode_sent_ms;
 	bool light;
+	bool strobe;
+	uint32_t strobe_t;
 	bool locked;
 	bool ble;
 
@@ -331,6 +343,25 @@ static void set_mode(uint8_t mode) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Headlight                                                           */
+/* ------------------------------------------------------------------ */
+
+static bool light_output(void) {
+	if (s.pwr != PWR_ON) {
+		return false;
+	}
+
+	if (!s.strobe) {
+		return s.light;
+	}
+
+	const uint32_t flash = LIGHT_STROBE_ON_MS + LIGHT_STROBE_OFF_MS;
+	const uint32_t burst = LIGHT_STROBE_FLASHES * flash;
+	uint32_t t = (s.now - s.strobe_t) % (burst + LIGHT_STROBE_PAUSE_MS);
+	return t < burst && (t % flash) < LIGHT_STROBE_ON_MS;
+}
+
+/* ------------------------------------------------------------------ */
 /* Power                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -345,6 +376,7 @@ static void power_off(void) {
 	s.pwr = PWR_OFF;
 	s.locked = false;
 	s.light = false;
+	s.strobe = false;
 	beep(1, 400);
 }
 
@@ -364,9 +396,23 @@ static void on_button(btn_event_t ev) {
 
 	case PWR_ON:
 		if (ev == BTN_SINGLE) {
-			if (!s.locked) {
+			if (s.locked) {
+				break;
+			}
+			if (s.strobe) {
+				// Out of strobe straight to off
+				s.strobe = false;
+				s.light = false;
+			} else {
 				s.light = !s.light;
-				beep(1, 40);
+			}
+			beep(1, 40);
+		} else if (ev == BTN_STROBE) {
+			if (!s.locked) {
+				s.strobe = !s.strobe;
+				s.strobe_t = s.now;
+				s.light = false;
+				beep(s.strobe ? 3 : 1, 40);
 			}
 		} else if (ev == BTN_DOUBLE) {
 			if (s.brk.value > 0.3f) {
@@ -391,7 +437,9 @@ static void on_button(btn_event_t ev) {
 static void btn_press(void) {
 	s.btn_holding = true;
 	s.btn_press_ms = s.now;
-	s.btn_clicks++;
+	if (s.btn_clicks < BTN_MAX_CLICKS) {
+		s.btn_clicks++;
+	}
 }
 
 static void btn_release(void) {
@@ -416,7 +464,15 @@ static void btn_task(void) {
 
 	if (!s.btn_holding && s.btn_clicks > 0 &&
 			s.now - s.btn_release_ms >= s.btn_double_ms) {
-		btn_event_t ev = s.btn_clicks >= 2 ? BTN_DOUBLE : BTN_SINGLE;
+		btn_event_t ev = BTN_SINGLE;
+		if (s.btn_clicks >= 2) {
+			ev = BTN_DOUBLE;
+		}
+#if LIGHT_STROBE_PRESSES
+		if (s.btn_clicks >= LIGHT_STROBE_PRESSES) {
+			ev = BTN_STROBE;
+		}
+#endif
 		s.btn_clicks = 0;
 		on_button(ev);
 	}
@@ -645,7 +701,7 @@ static void show_display(void) {
 	}
 	v.mode = (disp_mode_t)s.mode;
 	v.locked = s.locked;
-	v.light = s.light;
+	v.light = s.light || s.strobe;
 	v.ble = s.ble;
 	v.mph = DISPLAY_MPH;
 	v.temp_warn = s.temp_fet > TEMP_WARN_MOS_C || s.temp_motor > TEMP_WARN_MOTOR_C;
@@ -828,7 +884,7 @@ void dash_task(uint32_t now) {
 		power_off();
 	}
 
-	io_set_light(s.light && s.pwr == PWR_ON);
+	io_set_light(light_output());
 
 	if (now - s.t_disp >= DISPLAY_PERIOD_MS) {
 		s.t_disp = now;

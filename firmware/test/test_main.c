@@ -20,6 +20,7 @@
 #include "buffer.h"
 #include "packet.h"
 #include "vesc_link.h"
+#include "ble_bridge.h"
 #include "dash.h"
 #include "mock_hw.h"
 #include "systime.h"
@@ -28,7 +29,10 @@ void UART0_IRQHandler(void);
 
 #define TXD_IDLE        0xFFFFFFFFu
 #define BYTES_PER_MS    11
-#define VESC_HANDLER    1       // packet.c slot 1 is free on the host
+#define VESC_HANDLER    2       // packet.c slots: 0 link, 1 BLE, 2 VESC, 3 phone
+#define PHONE_HANDLER   3
+#define BLE_INTERVAL_MS 8       // connection interval
+#define BLE_TX_BUFS     4       // notifications per connection event
 
 static int m_fail;
 static int m_checks;
@@ -88,8 +92,24 @@ static struct {
 	int ble_fw_responses;
 	int ble_mcconf_responses;
 	int ble_other;
+	int lisp_writes_ok;
+	int lisp_writes_bad;
 	uint32_t jitter;    // extra random response latency, ms
 } v;
+
+// Phone running VESC Tool, connected over BLE
+static struct {
+	bool connected;
+	bool notify;        // notifications enabled
+	int tx_bufs;        // free SoftDevice TX buffers
+	int busy;           // times the bridge had to wait for a buffer
+	int fw;
+	int mcconf_ok;
+	int mcconf_bad;
+	int lisp_ok;
+	int lisp_bad;
+	int other;
+} ph;
 
 static uint32_t m_rand = 12345;
 static uint32_t rnd(uint32_t n) {
@@ -196,6 +216,22 @@ static void vesc_process(unsigned char *data, unsigned int len) {
 		v.last_js_y = data[2];
 		break;
 
+	case COMM_LISP_WRITE_CODE: {
+		// Payload pattern from phone_lisp_write(), reply [cmd ok]
+		bool ok = len == 1 + 500;
+		for (unsigned int i = 1;ok && i < len;i++) {
+			ok = data[i] == (uint8_t)(i * 7);
+		}
+		if (ok) {
+			v.lisp_writes_ok++;
+		} else {
+			v.lisp_writes_bad++;
+		}
+		resp[ind++] = COMM_LISP_WRITE_CODE;
+		resp[ind++] = ok;
+		vesc_schedule(resp, ind, latency);
+	} break;
+
 	case COMM_CUSTOM_APP_DATA:
 		if (len >= 4 && data[1] == 'G' && data[2] == 'D' && data[3] == 0x01) {
 			uint8_t r[6] = {COMM_CUSTOM_APP_DATA, 'G', 'D', 0x81, v.btn_level, v.btn_count};
@@ -213,6 +249,10 @@ static void vesc_process(unsigned char *data, unsigned int len) {
 /* Dash side glue (what main.c does on the target)                    */
 /* ------------------------------------------------------------------ */
 
+static void process_packet_ble(unsigned char *data, unsigned int len) {
+	(void)link_send(data, len, LINK_SRC_BLE, link_resp_ms_for_cmd(data[0]));
+}
+
 static void process_packet_vesc(unsigned char *data, unsigned int len) {
 	if (dash_on_vesc_packet(data, len)) {
 		return;
@@ -225,6 +265,87 @@ static void process_packet_vesc(unsigned char *data, unsigned int len) {
 	} else {
 		v.ble_other++;
 	}
+
+	(void)ble_bridge_send_packet(data, len);
+}
+
+/* ------------------------------------------------------------------ */
+/* Phone side of the BLE link                                         */
+/* ------------------------------------------------------------------ */
+
+// What the SoftDevice does with a notification
+static ble_send_res_t nus_send(uint8_t *data, uint16_t len) {
+	if (!ph.connected || !ph.notify) {
+		return BLE_SEND_FAIL;
+	}
+	if (ph.tx_bufs == 0) {
+		ph.busy++;
+		return BLE_SEND_BUSY;
+	}
+	if (len > BLE_BRIDGE_CHUNK) {
+		printf("notification of %u bytes\n", len);
+		m_fail++;
+	}
+	ph.tx_bufs--;
+	for (uint16_t i = 0;i < len;i++) {
+		packet_process_byte(data[i], PHONE_HANDLER);
+	}
+	return BLE_SEND_OK;
+}
+
+// Phone writes, split into 20 byte pieces like the GATT layer does
+static void phone_write(unsigned char *data, unsigned int len) {
+	while (len > 0) {
+		unsigned int n = len > BLE_BRIDGE_CHUNK ? BLE_BRIDGE_CHUNK : len;
+		ble_bridge_rx(data, n);
+		data += n;
+		len -= n;
+	}
+}
+
+static void phone_on_packet(unsigned char *data, unsigned int len) {
+	switch (data[0]) {
+	case COMM_FW_VERSION:
+		ph.fw++;
+		break;
+
+	case COMM_GET_MCCONF: {
+		bool ok = len == 450;
+		for (unsigned int i = 1;ok && i < len;i++) {
+			ok = data[i] == (uint8_t)(i - 1);
+		}
+		if (ok) {
+			ph.mcconf_ok++;
+		} else {
+			ph.mcconf_bad++;
+		}
+	} break;
+
+	case COMM_LISP_WRITE_CODE:
+		if (len == 2 && data[1]) {
+			ph.lisp_ok++;
+		} else {
+			ph.lisp_bad++;
+		}
+		break;
+
+	default:
+		ph.other++;
+		break;
+	}
+}
+
+static void phone_request(uint8_t cmd) {
+	packet_send_packet(&cmd, 1, PHONE_HANDLER);
+}
+
+static void phone_lisp_write(void) {
+	uint8_t buf[1 + 500];
+	buf[0] = COMM_LISP_WRITE_CODE;
+	for (unsigned int i = 1;i < sizeof(buf);i++) {
+		buf[i] = (uint8_t)(i * 7);
+	}
+	packet_send_packet(buf, sizeof(buf), PHONE_HANDLER);
 }
 
 /* ------------------------------------------------------------------ */
@@ -302,8 +423,16 @@ static void step(void) {
 		}
 	}
 
-	link_task(t, 1024);
+	// Connection event: TX complete frees the notification buffers
+	if (t % BLE_INTERVAL_MS == 0) {
+		ph.tx_bufs = BLE_TX_BUFS;
+	}
+
+	// Same order as the main loop on the target
+	ble_bridge_task(ph.connected);
+	link_task(t, ble_bridge_tx_free());
 	dash_task(t);
+	ble_bridge_task(ph.connected);
 }
 
 static void run(uint32_t ms) {
@@ -323,6 +452,28 @@ static void press(uint32_t hold_ms) {
 	v.btn_level = 0;
 }
 
+static __attribute__((unused)) void presses(int n) {
+	for (int i = 0;i < n;i++) {
+		press(120);
+		run(150);
+	}
+	run(750);
+}
+
+// Rising edges of the headlight output over ms
+static int light_flashes(uint32_t ms) {
+	int edges = 0;
+	bool last = mock_light;
+	for (uint32_t i = 0;i < ms;i++) {
+		run(1);
+		if (mock_light && !last) {
+			edges++;
+		}
+		last = mock_light;
+	}
+	return edges;
+}
+
 /* ------------------------------------------------------------------ */
 
 static const uint8_t font[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
@@ -333,7 +484,13 @@ int main(void) {
 	v.batt = 0.73f;
 	mock_uart0.TXD = TXD_IDLE;
 
+	memset(&ph, 0, sizeof(ph));
+	ph.connected = true;
+	ph.notify = true;
+
 	packet_init(vesc_line_put, vesc_process, VESC_HANDLER);
+	packet_init(phone_write, phone_on_packet, PHONE_HANDLER);
+	ble_bridge_init(process_packet_ble, nus_send);
 	link_init(process_packet_vesc);
 	dash_init();
 
@@ -417,6 +574,39 @@ int main(void) {
 	run(100);
 	CHECK(!(mock_grids[5] & 0x80), "unlocked");
 
+#if LIGHT_STROBE_PRESSES
+	// Strobe presses: strobe on, riding mode untouched
+	presses(LIGHT_STROBE_PRESSES);
+	CHECK(mock_grids[5] & 0x10, "mode unchanged by strobe presses");
+	CHECK(mock_grids[5] & 0x20, "light icon in strobe");
+	int flashes = light_flashes(1280);
+	CHECK(flashes >= 3 && flashes <= 5, "strobe flashes %d in 1.28 s", flashes);
+
+	// Single press: straight to off
+	press(150);
+	run(900);
+	CHECK(light_flashes(1000) == 0 && !mock_light, "light off after strobe");
+	CHECK(!(mock_grids[5] & 0x20), "light icon off");
+
+	// Strobe presses again: on, and off the same way
+	presses(LIGHT_STROBE_PRESSES);
+	CHECK(light_flashes(700) >= 1, "strobe on again");
+	presses(LIGHT_STROBE_PRESSES);
+	CHECK(light_flashes(1000) == 0 && !mock_light, "strobe off with strobe presses");
+
+	// Strobe is ignored while locked
+	mock_brk_raw = 600;
+	presses(2);
+	mock_brk_raw = 170;
+	presses(LIGHT_STROBE_PRESSES);
+	CHECK(light_flashes(1000) == 0, "no strobe when locked");
+	mock_brk_raw = 600;
+	presses(2);
+	mock_brk_raw = 170;
+	run(100);
+	CHECK(!(mock_grids[5] & 0x80), "unlocked after strobe test");
+#endif
+
 	// VESC Tool over BLE while riding
 	int fw0 = v.ble_fw_responses;
 	mock_thr_raw = 465;
@@ -431,6 +621,62 @@ int main(void) {
 	mock_thr_raw = 170;
 	run(100);
 
+	// VESC Tool over the BLE bridge: 20 byte writes and notifications with
+	// a limited number of TX buffers per connection event
+	int ph_fw0 = ph.fw;
+	for (int i = 0;i < 20;i++) {
+		phone_request(COMM_FW_VERSION);
+		run(60);
+	}
+	run(200);
+	CHECK(ph.fw - ph_fw0 == 20, "phone FW responses %d/20", ph.fw - ph_fw0);
+
+	for (int i = 0;i < 10;i++) {
+		phone_request(COMM_GET_MCCONF);
+		run(300);
+	}
+	run(300);
+	CHECK(ph.mcconf_ok == 10 && ph.mcconf_bad == 0, "phone big responses %d ok, %d bad",
+			ph.mcconf_ok, ph.mcconf_bad);
+	CHECK(ph.busy > 0, "BLE back pressure not exercised");
+
+	// 500 byte write from VESC Tool (Lisp upload chunk)
+	for (int i = 0;i < 5;i++) {
+		phone_lisp_write();
+		run(300);
+	}
+	run(200);
+	CHECK(v.lisp_writes_ok == 5 && v.lisp_writes_bad == 0, "big writes at the VESC %d ok, %d bad",
+			v.lisp_writes_ok, v.lisp_writes_bad);
+	CHECK(ph.lisp_ok == 5 && ph.lisp_bad == 0, "big write replies %d ok, %d bad",
+			ph.lisp_ok, ph.lisp_bad);
+
+	// Notifications not enabled yet: replies are dropped, nothing gets stuck
+	ph_fw0 = ph.fw;
+	ph.notify = false;
+	phone_request(COMM_FW_VERSION);
+	run(300);
+	ph.notify = true;
+	phone_request(COMM_FW_VERSION);
+	run(300);
+	CHECK(ph.fw - ph_fw0 == 1, "after enabling notifications %d/1", ph.fw - ph_fw0);
+
+	// Disconnect in the middle of a big reply, then reconnect
+	int mc_ok0 = ph.mcconf_ok;
+	phone_request(COMM_GET_MCCONF);
+	run(70);
+	ph.connected = false;
+	packet_reset(PHONE_HANDLER);
+	run(300);
+	ph.connected = true;
+	run(50);
+	phone_request(COMM_GET_MCCONF);
+	phone_request(COMM_FW_VERSION);
+	run(500);
+	CHECK(ph.mcconf_ok - mc_ok0 >= 1 && ph.mcconf_bad == 0,
+			"reply after reconnect %d ok, %d bad", ph.mcconf_ok - mc_ok0, ph.mcconf_bad);
+	CHECK(ph.other == 0, "unexpected packets at the phone: %d", ph.other);
+
 	// Fault code
 	v.fault = 5;
 	bool saw_code = false;
@@ -444,6 +690,9 @@ int main(void) {
 	v.fault = 0;
 
 	// Long press: off, single press: on
+#if LIGHT_STROBE_PRESSES
+	presses(LIGHT_STROBE_PRESSES);
+#endif
 	press(2500);
 	run(300);
 	CHECK(!mock_display_on, "display off after long press");
@@ -455,6 +704,7 @@ int main(void) {
 	press(150);
 	run(900);
 	CHECK(mock_display_on, "display on again");
+	CHECK(light_flashes(1000) == 0, "light and strobe stay off after power on");
 
 	// Throttle held while turning on must not start the motor
 	press(2500);
