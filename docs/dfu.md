@@ -1,5 +1,11 @@
 # BLE updates (Nordic secure DFU)
 
+> [!WARNING]
+> **BLE DFU (over-the-air update) does not work at the moment.** Uploading
+> a `_dfu.zip` from nRF Connect / nRF Toolbox fails. Install and update over
+> SWD (ST-Link / J-Link) with the `_full.hex` and `_app.hex` files, and do
+> not use the `_factory.hex` / `_dfu.zip` files for now.
+
 After a one-time ST-Link install of the *factory* image, the firmware can be
 updated over Bluetooth with a standard Nordic DFU app. No cable, no
 ScooterHacking. Updates are signed; the dashboard only accepts packages

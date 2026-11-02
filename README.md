@@ -20,6 +20,12 @@ Replacement firmware for the stock Segway-Ninebot Max G30 BLE dashboard
 > modes (see [Tests](#tests)), but it has **not been run on a real
 > dashboard yet**. Do the first test with the wheel off the ground.
 
+> [!WARNING]
+> **BLE DFU (over-the-air update) does not work at the moment.** Uploading
+> a `_dfu.zip` from nRF Connect / nRF Toolbox fails. Install and update over
+> SWD (ST-Link / J-Link) with the `_full.hex` and `_app.hex` files, and do
+> not use the `_factory.hex` / `_dfu.zip` files for now.
+
 ## How it works
 
 The stock dashboard has a single nRF51822 that drives the LED display,
@@ -109,6 +115,12 @@ from the programmer's 3.3V or through the red wire.
 Prebuilt images are in [release/](release/). The `_full.hex` files
 contain the S130 SoftDevice and the application and need a full chip
 erase, which also removes the stock SoftDevice, bootloader and firmware.
+
+> [!WARNING]
+> **BLE DFU (over-the-air update) does not work at the moment.** Uploading
+> a `_dfu.zip` from nRF Connect / nRF Toolbox fails. Install and update over
+> SWD (ST-Link / J-Link) with the `_full.hex` and `_app.hex` files, and do
+> not use the `_factory.hex` / `_dfu.zip` files for now.
 
 To update later over Bluetooth instead of ST-Link, flash the `_factory.hex`
 (SoftDevice + DFU bootloader + app) once and then use signed `_dfu.zip`
